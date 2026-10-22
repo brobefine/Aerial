@@ -1,0 +1,37 @@
+# Готовые стены «Вселенных» — раз в неделю (понедельник, 03:00 UTC) и по кнопке Run workflow.
+# Кладётся в репозиторий релизов как .github/workflows/universes.yml, рядом — tools/universes/build.py.
+# Результат — ветка universes-data без истории (каждый раз заменяется целиком): папка universes/ с картинками и списками.
+# Ключ TMDb — секрет репозитория TMDB_API_KEY (Settings → Secrets and variables → Actions).
+name: universes
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pillow==11.0.0
+      - name: Build walls
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: python tools/universes/build.py out/universes
+      - name: Publish branch universes-data
+        run: |
+          cd out
+          git init -q -b universes-data
+          git config user.name "universes-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add universes
+          git commit -q -m "Стены вселенных $(date -u +%F)"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" universes-data
