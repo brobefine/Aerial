@@ -37,6 +37,8 @@ jobs:
           MDBLIST_API_KEY: ${{ secrets.MDBLIST_API_KEY }}
           OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          # Тот же ключ MDBList у Worker aerial-api (/ratings) — ему остаётся ~400 запросов в день на работы не из файла.
+          MDB_BUDGET: "600"
         run: python tools/ratings/build.py out/ratings
       - name: Publish branch ratings-data
         run: |
