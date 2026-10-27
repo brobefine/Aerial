@@ -1,0 +1,49 @@
+# Готовые оценки (IMDb, RT, Metacritic, Letterboxd) — каждый день в 09:00 UTC (после выгрузок TMDb) и по кнопке Run workflow.
+# Кладётся в репозиторий релизов как .github/workflows/ratings.yml, рядом — tools/ratings/build.py.
+# Результат — ветка ratings-data из одного коммита: каждый запуск берёт прошлое содержимое, дополняет и заменяет ветку.
+# Секреты репозитория (Settings → Secrets and variables → Actions): MDBLIST_API_KEY, OMDB_API_KEY, TMDB_API_KEY.
+# Нет какого-то ключа — этот источник пропускается.
+name: ratings
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ratings
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Previous data
+        run: |
+          mkdir -p out
+          if git ls-remote --exit-code origin ratings-data >/dev/null; then
+            git fetch -q --depth 1 origin ratings-data
+            git --work-tree=out checkout FETCH_HEAD -- ratings
+          fi
+      - name: Collect ratings
+        env:
+          MDBLIST_API_KEY: ${{ secrets.MDBLIST_API_KEY }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: python tools/ratings/build.py out/ratings
+      - name: Publish branch ratings-data
+        run: |
+          cd out
+          git init -q -b ratings-data
+          git config user.name "ratings-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add ratings
+          git commit -q -m "Оценки $(date -u +%F)"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" ratings-data
