@@ -9,7 +9,9 @@
   работ из очереди сверх квот (номер IMDb у TMDb, лимита нет).
 Нет ключа — этот источник пропускается.
 
-Вывод: <папка>/movie/<id // 1000>.json и <папка>/tv/<id // 1000>.json, в каждом {"<id TMDb>": [imdb, tomatoes, popcorn,
+Вывод: <папка>/imdb/<номер IMDb без tt // 10000>.json — весь файл IMDb, {"76759": 8.6}: приложение берёт оценку IMDb
+любой работы по её номеру IMDb (номер — у TMDb), даже если работы ещё нет в собранном;
+<папка>/movie/<id // 1000>.json и <папка>/tv/<id // 1000>.json, в каждом {"<id TMDb>": [imdb, tomatoes, popcorn,
 metacritic, letterboxd, imdbId, год, день сбора, источник]}; null — нет оценки. Приложению нужны первые пять — шкалы как
 у MDBList (`MdbListRatings.formatValues`): IMDb 0–10, RT и Metacritic 0–100, Letterboxd 0–5. День — с 1 января 2020,
 источник: m — MDBList (полно), o — OMDb (без зрителей RT и Letterboxd), i — только IMDb.
@@ -188,9 +190,28 @@ def imdb_dataset():
     for line in io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8"):
         parts = line.rstrip("\n").split("\t")
         if len(parts) == 3 and parts[0].startswith("tt"):
-            out[parts[0]] = num(parts[1], 0, 10)
+            value = num(parts[1], 0, 10)
+            if value is not None and parts[0][2:].isdigit():
+                out[parts[0]] = value
     print(f"IMDb: {len(out)} оценок")
     return out
+
+
+def write_imdb(root, ratings):
+    """Весь файл IMDb кусками по номеру: каждый раз заново (оценки меняются у всех)."""
+    shards = {}
+    for imdb_id, value in ratings.items():
+        n = int(imdb_id[2:])
+        shards.setdefault(n // 10000, {})[str(n)] = value
+    folder = os.path.join(root, "imdb")
+    if os.path.isdir(folder):
+        for name in os.listdir(folder):
+            os.remove(os.path.join(folder, name))
+    os.makedirs(folder, exist_ok=True)
+    for k, shard in shards.items():
+        with open(os.path.join(folder, f"{k}.json"), "w", encoding="utf-8") as f:
+            json.dump(shard, f, separators=(",", ":"), sort_keys=True)
+    print(f"IMDb: файлов {len(shards)}")
 
 
 # ---------- сборка ----------
@@ -231,8 +252,9 @@ def main():
         print(f"MDBList: {got} из {len(plan)}")
 
     rest = [w for w in fresh if w not in taken]
+    ratings = imdb_dataset()
+    write_imdb(root, ratings)
     if OMDB_KEY or IMDB_ONLY:
-        ratings = imdb_dataset()
         omdb_left, got_o, got_i = OMDB_BUDGET if OMDB_KEY else 0, 0, 0
         plan = rest[:omdb_left + IMDB_ONLY] if (TMDB_KEY or TMDB_TOKEN) else []
         with cf.ThreadPoolExecutor(8) as pool:
@@ -260,15 +282,15 @@ def main():
                 store.put(kind, tmdb, row)
         print(f"OMDb: {got_o}; только IMDb: {got_i}")
 
-        # Свежая оценка IMDb всем собранным — бесплатно, из файла.
-        updated = 0
-        for kind, tmdb, row in list(store.rows()):
-            value = ratings.get(row[I_IMDB_ID] or "")
-            if value is not None and value != row[I_IMDB]:
-                row[I_IMDB] = value
-                store.put(kind, tmdb, row)
-                updated += 1
-        print(f"IMDb обновлено: {updated}")
+    # Свежая оценка IMDb всем собранным — бесплатно, из файла.
+    updated = 0
+    for kind, tmdb, row in list(store.rows()):
+        value = ratings.get(row[I_IMDB_ID] or "")
+        if value is not None and value != row[I_IMDB]:
+            row[I_IMDB] = value
+            store.put(kind, tmdb, row)
+            updated += 1
+    print(f"IMDb обновлено: {updated}")
 
     store.save()
     total = sum(1 for _ in store.rows())
